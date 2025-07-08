@@ -44,20 +44,18 @@ export default async function handler(request, response) {
 
     const targetLanguage = languageMap[language] || 'English';
 
-    // --- FIX: Using a more robust System Instruction ---
-    // This instruction is sent separately from the chat history to give it more weight.
-    // We are being more forceful with the language command.
+    // --- FINAL LANGUAGE FIX: Making the prompt extremely strict ---
+    let systemText;
+    if (targetLanguage === 'Hindi') {
+        systemText = `आप 'AI दुकानदार' हैं, भारत में एक स्थानीय बाज़ार के लिए एक दोस्ताना और सहायक AI दुकानदार। आप ${userName} नामक ग्राहक की सेवा कर रहे हैं जो ${location} पर स्थित है। आपका लक्ष्य उन्हें स्थानीय रूप से उपलब्ध उत्पादों और सेवाओं को खोजने में मदद करना है। ग्राहक की पसंदीदा भाषा हिंदी है। आपकी प्रतिक्रिया विशेष रूप से देवनागरी लिपि में शुद्ध हिंदी में होनी चाहिए। किसी भी अंग्रेजी शब्द या रोमन लिपि का प्रयोग न करें। उदाहरण के लिए, यदि उपयोगकर्ता पूछता है "मुझे 1 किलो चीनी चाहिए", तो एक अच्छी प्रतिक्रिया होगी "ज़रूर, 1 किलो चीनी का दाम 45 रुपये है। क्या मैं आपके लिए ऑर्डर कर दूँ?"`;
+    } else {
+        systemText = `You are 'AI Dukandar', a friendly and helpful AI shopkeeper for a local marketplace in India. You are serving a customer named ${userName} who is located at ${location}. Your goal is to help them find products and services available locally. The customer's preferred language is ${targetLanguage}. Your response MUST be exclusively in ${targetLanguage}.`;
+    }
+
     const systemInstruction = {
-      parts: [{
-        text: `You are 'AI Dukandar', a friendly and helpful AI shopkeeper for a local marketplace in India. 
-        You are serving a customer named ${userName} who is located at ${location}. 
-        Your goal is to help them find products and services available locally.
-        The customer's preferred language is ${targetLanguage}.
-        Your response MUST be exclusively in ${targetLanguage}. Do not use any other language.`
-      }]
+      parts: [{ text: systemText }]
     };
 
-    // The chat history and the new user message.
     const contents = [
         ...chatHistory.map(msg => ({
             role: msg.from === 'user' ? 'user' : 'model',
@@ -69,7 +67,6 @@ export default async function handler(request, response) {
         }
     ];
     
-    // The final payload includes the contents and the new system instruction.
     const payload = {
       contents: contents,
       systemInstruction: systemInstruction,
@@ -77,17 +74,13 @@ export default async function handler(request, response) {
 
     // --- FALLBACK LOGIC ---
     let geminiResponse;
-
-    // 1. Try with the primary key first.
     geminiResponse = await callGeminiAPI(PRIMARY_API_KEY, payload);
 
-    // 2. If it fails due to a quota error (429) and a fallback key exists, try the fallback key.
     if (geminiResponse.status === 429 && FALLBACK_API_KEY) {
       console.log("Primary key quota exceeded. Trying fallback key.");
       geminiResponse = await callGeminiAPI(FALLBACK_API_KEY, payload);
     }
     
-    // 3. Check if the final response is OK.
     if (!geminiResponse.ok) {
         const errorText = await geminiResponse.text();
         throw new Error(`Gemini API error: ${geminiResponse.status} ${geminiResponse.statusText} - ${errorText}`);
@@ -96,12 +89,10 @@ export default async function handler(request, response) {
     const data = await geminiResponse.json();
 
     let botResponseText = "Sorry, I couldn't process that. Please try again.";
-    // Check for response existence in the new structure
     if (data.candidates && data.candidates.length > 0 && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0].text) {
       botResponseText = data.candidates[0].content.parts[0].text;
     }
 
-    // Send the successful response back to the frontend
     return response.status(200).json({ text: botResponseText });
 
   } catch (error) {
